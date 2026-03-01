@@ -1,0 +1,762 @@
+// Prisma Schema for Avsar ATS
+// UAE-focused Applicant Tracking & Recruitment Platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  CANDIDATE
+  EMPLOYER
+  ADMIN
+}
+
+enum CandidateStatus {
+  DRAFT
+  PROFILE_COMPLETE
+  APPLICATION_SUBMITTED
+  SCREENING
+  INTERVIEW
+  OFFER
+  HIRED
+  REJECTED
+  WITHDRAWN
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  OFFER
+  HIRED
+  REJECTED
+  WITHDRAWN
+}
+
+enum JobStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  CLOSED
+  ARCHIVED
+}
+
+enum OfferStatus {
+  DRAFT
+  SENT
+  VIEWED
+  SIGNED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentModel {
+  ESCROW
+  UNLOCK_ONLY
+  HYBRID
+}
+
+enum ContractStatus {
+  DRAFT
+  PENDING_SIGNATURE
+  SIGNED
+  ACTIVE
+  TERMINATED
+}
+
+enum VisaStatus {
+  VISITOR
+  EMPLOYMENT_VISA
+  RESIDENT_VISA
+  GOLDEN_VISA
+  SPONSORED
+  CANCELLED
+}
+
+enum ComplianceStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum WorkType {
+  ON_SITE
+  REMOTE
+  HYBRID
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERNSHIP
+}
+
+// ============================================
+// CORE MODELS
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String?
+  phone         String?
+  role          UserRole  @default(CANDIDATE)
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  candidateProfile    CandidateProfile?
+  employerProfile     EmployerProfile?
+  adminSettings       AdminSetting[]
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+  sessions            Session[]
+  account             Account?
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @unique
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// CANDIDATE PORTAL
+// ============================================
+
+model CandidateProfile {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Personal Info
+  firstName           String
+  lastName            String
+  displayName         String?
+  photoUrl            String?
+  dateOfBirth         DateTime?
+  nationality         String
+  location            String?
+  currentVisaType     VisaStatus?
+  visaExpiryDate      DateTime?
+
+  // Contact (masked until payment)
+  email               String
+  phone               String?
+  linkedinUrl         String?
+  portfolioUrl        String?
+
+  // AI-Extracted Data
+  extractedSkills     String[]
+  yearsOfExperience   Int?
+  currentSalary       Int?
+  expectedSalary      Int?
+  noticePeriod        Int?
+  industry            String?
+
+  // Employment History
+  employmentHistory   Json?
+  education           Json?
+
+  // CV
+  cvUrl               String?
+  cvFileName          String?
+  rawText             String?
+
+  // Profile Completion
+  profileCompletion   Int      @default(0)
+
+  // Status
+  status              CandidateStatus @default(DRAFT)
+
+  // Timestamps
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  applications        Application[]
+  complianceDocs      ComplianceDocument[]
+  compliance          CandidateCompliance?
+  savedJobs          SavedJob[]
+  unlocks            CandidateUnlock[]
+  jobMatches         JobMatch[]
+  payments           Payment[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([extractedSkills])
+  @@index([location])
+  @@index([yearsOfExperience])
+}
+
+model CandidateCompliance {
+  id                    String   @id @default(cuid())
+  candidateProfileId    String   @unique
+  candidateProfile      CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+
+  // Emirates ID
+  emiratesId            String?
+  emiratesIdExpiry      DateTime?
+  emiratesIdDocUrl      String?
+
+  // Visa
+  visaStatus            VisaStatus?
+  visaExpiryDate        DateTime?
+  visaDocUrl            String?
+
+  // Labor Contract (MOHRE)
+  laborContractNumber   String?
+  laborContractDocUrl   String?
+
+  // Medical
+  medicalStatus         String?
+  medicalDocUrl         String?
+  medicalExpiry         DateTime?
+
+  // Passport
+  passportNumber        String?
+  passportExpiry        DateTime?
+  passportDocUrl        String?
+
+  // Status
+  overallStatus         ComplianceStatus @default(PENDING)
+  lastCheckedAt         DateTime?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// ============================================
+// EMPLOYER PORTAL
+// ============================================
+
+model EmployerProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Company Info
+  companyName       String
+  companyLogoUrl    String?
+  website           String?
+  industry          String
+  companySize       String?
+  description       String?
+  foundedYear       Int?
+  headquarters      String?
+
+  // Contact
+  contactPerson     String?
+  contactEmail      String?
+  contactPhone      String?
+
+  // Verification
+  isVerified        Boolean  @default(false)
+  verifiedAt        DateTime?
+  tradeLicenseUrl   String?
+
+  // Subscription
+  plan              String   @default("FREE")
+  credits           Int      @default(0)
+  creditsUsed       Int      @default(0)
+
+  // Payment Settings
+  paymentModel      PaymentModel @default(ESCROW)
+  stripeCustomerId  String?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  jobs              Job[]
+  teamMembers       TeamMember[]
+  payments          Payment[]
+  unlocks           CandidateUnlock[]
+  jobMatches        JobMatch[]
+
+  @@index([userId])
+  @@index([companyName])
+}
+
+model TeamMember {
+  id                String   @id @default(cuid())
+  employerProfileId String
+  employerProfile   EmployerProfile @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
+
+  email             String
+  name              String
+  role              String
+
+  createdAt         DateTime @default(now())
+
+  @@unique([employerProfileId, email])
+}
+
+// ============================================
+// JOBS & APPLICATIONS
+// ============================================
+
+model Job {
+  id                String   @id @default(cuid())
+  employerProfileId String
+  employerProfile   EmployerProfile @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
+
+  // Job Details
+  title             String
+  department        String?
+  description       String
+  requirements      String?
+  jdUrl             String?
+
+  // AI-Parsed JD Data
+  parsedSkills      String[]
+  experienceMin     Int?
+  experienceMax     Int?
+  salaryMin         Int?
+  salaryMax         Int?
+  location          String?
+  workType          WorkType @default(ON_SITE)
+
+  // Status
+  status            JobStatus @default(DRAFT)
+
+  // Metrics
+  views             Int      @default(0)
+  applicationCount  Int      @default(0)
+
+  // Settings
+  isFeatured        Boolean  @default(false)
+  expiresAt         DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  applications      Application[]
+  savedByCandidates SavedJob[]
+  matches           JobMatch[]
+
+  @@index([employerProfileId])
+  @@index([status])
+  @@index([parsedSkills])
+  @@index([location])
+}
+
+model Application {
+  id                  String   @id @default(cuid())
+  candidateProfileId   String
+  candidateProfile    CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+  jobId               String
+  job                 Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  // Status (Kanban)
+  status              ApplicationStatus @default(APPLIED)
+
+  // Screening
+  coverLetter         String?
+  screeningAnswers    Json?
+  screeningScore      Int?
+
+  // Interview
+  interviewDate       DateTime?
+  interviewNotes      String?
+  interviewRating     Int?
+
+  // AI Matching
+  matchScore          Int?
+
+  // Timeline
+  appliedAt           DateTime @default(now())
+  statusChangedAt     DateTime @updatedAt
+
+  // Relations
+  offers              Offer[]
+  rejectionReason     String?
+
+  @@unique([candidateProfileId, jobId])
+  @@index([jobId])
+  @@index([status])
+}
+
+model SavedJob {
+  id                String   @id @default(cuid())
+  candidateProfileId String
+  candidateProfile  CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+  jobId             String
+  job               Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime @default(now())
+
+  @@unique([candidateProfileId, jobId])
+}
+
+// ============================================
+// OFFER & CONTRACT SYSTEM
+// ============================================
+
+model Offer {
+  id                String   @id @default(cuid())
+  applicationId     String
+  application       Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  // Offer Details
+  position          String
+  department        String?
+  startDate         DateTime
+  employmentType    EmploymentType @default(FULL_TIME)
+
+  // Salary Breakdown (AED)
+  basicSalary       Int
+  housingAllowance  Int      @default(0)
+  transportAllowance Int     @default(0)
+  otherAllowances   Int      @default(0)
+  totalCTC          Int
+
+  // Probation
+  probationPeriod   Int      @default(90)
+  probationTerms    String?
+
+  // Leave & Benefits
+  annualLeaveDays   Int      @default(30)
+  sickLeaveDays     Int      @default(30)
+
+  // Legal Clauses
+  nonCompeteClause  String?
+  confidentialityClause String?
+  terminationClause String?
+  governingLaw      String   @default("UAE")
+
+  // Status
+  status            OfferStatus @default(DRAFT)
+
+  // Document
+  offerPdfUrl       String?
+
+  // Timestamps
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  sentAt            DateTime?
+  viewedAt          DateTime?
+  signedAt          DateTime?
+
+  // Relations
+  contracts         Contract[]
+  versions          OfferVersion[]
+}
+
+model OfferVersion {
+  id                  String   @id @default(cuid())
+  offerId             String
+  offer               Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  versionNumber       Int
+  changes             String?
+
+  // Snapshot of offer data
+  position            String
+  department          String?
+  startDate           DateTime
+  employmentType      EmploymentType
+  basicSalary         Int
+  housingAllowance    Int
+  transportAllowance  Int
+  otherAllowances     Int
+  totalCTC            Int
+  probationPeriod     Int
+  probationTerms      String?
+  annualLeaveDays     Int
+  sickLeaveDays       Int
+  nonCompeteClause    String?
+  confidentialityClause String?
+  terminationClause  String?
+  governingLaw       String
+
+  createdAt           DateTime @default(now())
+  createdBy           String
+
+  @@unique([offerId, versionNumber])
+}
+
+model Contract {
+  id                String   @id @default(cuid())
+  offerId           String
+  offer             Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  // Contract Data
+  contractNumber    String   @unique
+  templateType      String
+
+  // Signatures
+  employerSigned    Boolean  @default(false)
+  employerSignedAt  DateTime?
+  employerSignedBy  String?
+  candidateSigned   Boolean  @default(false)
+  candidateSignedAt DateTime?
+
+  // E-Signature Data
+  signatureToken    String?
+  signedPdfUrl      String?
+
+  // Status
+  status            ContractStatus @default(DRAFT)
+
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  signatures        ContractSignature[]
+}
+
+model ContractSignature {
+  id                String   @id @default(cuid())
+  contractId        String
+  contract          Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  signedBy          String
+  signedByRole      String
+  signedAt          DateTime
+  ipAddress         String?
+  userAgent         String?
+
+  // DocuSign envelope info
+  envelopeId        String?
+  clientId          String?
+
+  createdAt         DateTime @default(now())
+}
+
+// ============================================
+// PAYMENT SYSTEM
+// ============================================
+
+model Payment {
+  id                String   @id @default(cuid())
+  employerProfileId  String
+  employerProfile   EmployerProfile @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
+
+  // Payment Type
+  type              String
+
+  // Amount (AED)
+  amount            Int
+  currency          String   @default("AED")
+  fee               Int      @default(0)
+  total             Int
+
+  // Related Entity
+  candidateProfileId String?
+  applicationId     String?
+
+  // Stripe
+  stripePaymentId   String?
+  stripeInvoiceId   String?
+  invoiceUrl       String?
+
+  // Status
+  status            PaymentStatus @default(PENDING)
+
+  // Timestamps
+  createdAt         DateTime  @default(now())
+  paidAt            DateTime?
+
+  // Relations
+  refunds           Refund[]
+  unlocks           CandidateUnlock[]
+  candidate         CandidateProfile? @relation(fields: [candidateProfileId], references: [id])
+}
+
+model Refund {
+  id                String   @id @default(cuid())
+  paymentId         String
+  payment           Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  amount            Int
+  reason            String?
+  stripeRefundId    String?
+
+  status            String   @default("PENDING")
+
+  createdAt         DateTime @default(now())
+  processedAt       DateTime?
+}
+
+// ============================================
+// AI MATCHING & CV POOL
+// ============================================
+
+model CandidateUnlock {
+  id                String   @id @default(cuid())
+  employerProfileId String
+  employerProfile   EmployerProfile @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
+  candidateProfileId String
+  candidateProfile  CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+
+  // Payment
+  paymentId         String?
+  payment           Payment? @relation(fields: [paymentId], references: [id])
+
+  // Access
+  unlockedAt        DateTime @default(now())
+  expiresAt         DateTime
+
+  @@unique([employerProfileId, candidateProfileId])
+}
+
+model JobMatch {
+  id                  String   @id @default(cuid())
+  jobId               String
+  job                 Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  employerProfileId   String
+  employerProfile     EmployerProfile @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
+  candidateProfileId  String
+  candidateProfile    CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+
+  // Match Data
+  score               Int
+  matchedSkills       String[]
+  missingSkills       String[]
+  experienceMatch     Boolean
+  salaryMatch         Boolean
+
+  // Explainability
+  explanation         String?
+
+  calculatedAt        DateTime @default(now())
+
+  @@unique([jobId, candidateProfileId, employerProfileId])
+}
+
+// ============================================
+// COMPLIANCE DOCUMENTS
+// ============================================
+
+model ComplianceDocument {
+  id                  String   @id @default(cuid())
+  candidateProfileId  String
+  candidateProfile    CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+
+  type                String
+  documentUrl         String?
+  documentNumber      String?
+  issueDate           DateTime?
+  expiryDate         DateTime?
+
+  status              ComplianceStatus @default(PENDING)
+  verifiedAt         DateTime?
+  verifiedBy         String?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([candidateProfileId])
+  @@index([expiryDate])
+}
+
+// ============================================
+// AUDIT & LOGGING
+// ============================================
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actorUserId   String
+  actor         User     @relation(fields: [actorUserId], references: [id])
+
+  action        String
+  entityType    String
+  entityId      String
+
+  // Details
+  description   String?
+  previousValue Json?
+  newValue      Json?
+  ipAddress     String?
+  userAgent     String?
+
+  createdAt     DateTime @default(now())
+
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        String
+  title       String
+  message     String
+
+  read        Boolean  @default(false)
+  readAt      DateTime?
+
+  actionUrl   String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
+
+// ============================================
+// ADMIN SETTINGS
+// ============================================
+
+model AdminSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  updatedById String
+  updatedBy   User     @relation(fields: [updatedById], references: [id])
+}
